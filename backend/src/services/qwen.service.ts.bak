@@ -1,0 +1,257 @@
+/**
+ * Qwen-VL API service — encapsulates Alibaba DashScope multimodal API calls.
+ *
+ * Uses DashScope multimodal-generation endpoint with Qwen-VL model.
+ * Auth: ALIBABA_CLOUD_ACCESS_KEY_ID + ALIBABA_CLOUD_ACCESS_KEY_SECRET
+ *
+ * Supports both non-streaming (callQwen) and SSE streaming (callQwenStream).
+ */
+
+import { logger } from '../utils/logger';
+
+/* ---------- Qwen DashScope types ---------- */
+
+interface QwenContentPart {
+  image?: string;
+  text?: string;
+}
+
+interface QwenMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: QwenContentPart[];
+}
+
+interface QwenRequest {
+  model: string;
+  input: {
+    messages: QwenMessage[];
+  };
+  parameters?: {
+    top_p?: number;
+    temperature?: number;
+    max_tokens?: number;
+    incremental_output?: boolean;
+  };
+}
+
+interface QwenResponse {
+  output: {
+    choices: Array<{
+      message: {
+        role: string;
+        content: string;
+      };
+    }>;
+  };
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+}
+
+/* ---------- Public types ---------- */
+
+export interface QwenCallParams {
+  system: string;
+  messages: Array<{
+    role: 'user' | 'assistant';
+    content: string | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } }
+    >;
+  }>;
+  stream?: boolean;
+}
+
+export interface QwenCallResult {
+  content: Array<{ type: 'text'; text: string }>;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+
+/* ---------- Helpers ---------- */
+
+function getConfig() {
+  const apiKey = process.env.DASHSCOPE_API_KEY;
+  if (!apiKey) {
+    throw new Error('DASHSCOPE_API_KEY must be configured');
+  }
+  return {
+    apiKey,
+    endpoint: process.env.QWEN_VL_API_ENDPOINT || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    model: process.env.QWEN_VL_MODEL || 'qwen-vl-max',
+  };
+}
+
+function buildQwenMessages(params: QwenCallParams): QwenMessage[] {
+  const qwenMessages: QwenMessage[] = [];
+
+  if (params.system) {
+    qwenMessages.push({ role: 'system', content: [{ text: params.system }] });
+  }
+
+  for (const msg of params.messages) {
+    const parts: QwenContentPart[] = [];
+    if (typeof msg.content === 'string') {
+      parts.push({ text: msg.content });
+    } else {
+      for (const block of msg.content) {
+        if (block.type === 'text') parts.push({ text: block.text });
+        else if (block.type === 'image') parts.push({ image: block.source.data });
+      }
+    }
+    qwenMessages.push({ role: msg.role, content: parts });
+  }
+
+  return qwenMessages;
+}
+
+/* ---------- Non-streaming ---------- */
+
+export async function callQwen(params: QwenCallParams): Promise<QwenCallResult> {
+  const { apiKey, endpoint, model } = getConfig();
+  const startTime = Date.now();
+
+  const request: QwenRequest = {
+    model,
+    input: { messages: buildQwenMessages(params) },
+    parameters: { temperature: 0.7, max_tokens: 500, top_p: 0.8 },
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'X-DashScope-SSE': 'disable',
+    },
+    body: JSON.stringify(request),
+  });
+
+  const latencyMs = Date.now() - startTime;
+
+  if (!response.ok) {
+    const errText = await response.text();
+    logger.error('qwen_api_error', { status: response.status, latencyMs });
+    if (response.status === 429) throw new Error('Qwen API rate limit exceeded.');
+    if (response.status === 401) throw new Error('Invalid Alibaba Cloud credentials.');
+    throw new Error(`Qwen API error (${response.status}): ${errText}`);
+  }
+
+  const data = (await response.json()) as QwenResponse;
+  logger.info('qwen_api_call', { latencyMs, inputTokens: data.usage?.input_tokens, outputTokens: data.usage?.output_tokens, model });
+
+  const rawContent = data.output.choices[0]?.message?.content;
+  const text = typeof rawContent === "string" ? rawContent : (Array.isArray(rawContent) ? (rawContent[0]?.text || JSON.stringify(rawContent)) : "抱歉，我无法理解这个请求。");
+  return {
+    content: [{ type: 'text', text }],
+    usage: data.usage ? { input_tokens: data.usage.input_tokens, output_tokens: data.usage.output_tokens } : undefined,
+  };
+}
+
+/* ---------- SSE streaming ---------- */
+
+export interface QwenStreamChunk {
+  content: string; // incremental text delta
+  finish_reason?: string;
+}
+
+/**
+ * Call Qwen in SSE streaming mode.
+ * Returns an async iterable of { content } chunks.
+ * The caller is responsible for piping these to an Express Response.
+ */
+export async function* callQwenStream(
+  params: QwenCallParams,
+): AsyncGenerator<QwenStreamChunk, void, undefined> {
+  const { apiKey, endpoint, model } = getConfig();
+  const startTime = Date.now();
+
+  const request: QwenRequest = {
+    model,
+    input: { messages: buildQwenMessages(params) },
+    parameters: {
+      temperature: 0.7,
+      max_tokens: 500,
+      top_p: 0.8,
+      incremental_output: true,
+    },
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'X-DashScope-SSE': 'enable',
+      'Accept': 'text/event-stream',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    logger.error('qwen_stream_error', { status: response.status });
+    yield { content: `Error: API returned ${response.status}`, finish_reason: 'error' };
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    yield { content: 'Error: no response body', finish_reason: 'error' };
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let totalOutput = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+
+        if (trimmed.startsWith('data:')) {
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr === '[DONE]') return;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta =
+              parsed.output?.choices?.[0]?.message?.content ||
+              parsed.choices?.[0]?.delta?.content ||
+              '';
+            if (delta) {
+              totalOutput += delta;
+              yield { content: delta };
+            }
+            // check finish_reason
+            const reason =
+              parsed.output?.choices?.[0]?.finish_reason ||
+              parsed.choices?.[0]?.finish_reason;
+            if (reason && reason !== 'null') {
+              yield { content: '', finish_reason: reason };
+            }
+          } catch {
+            // ignore unparseable SSE lines
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+    const latencyMs = Date.now() - startTime;
+    logger.info('qwen_stream_complete', { latencyMs, outputLength: totalOutput.length, model });
+  }
+}

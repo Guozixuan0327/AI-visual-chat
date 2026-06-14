@@ -1,0 +1,15 @@
+# Experiment Data
+
+> Auto-generated placeholder. Run the app and ask a few questions, then export from the UI.
+> Replace this file with the exported data once you have real numbers.
+
+## Format
+
+Each row: `timestamp,latencyMs,imageSent,imageTokens,textTokens,totalCostUSD`
+
+## Data
+
+```
+timestamp,latencyMs,imageSent,imageTokens,textTokens,totalCostUSD
+-- no data yet, run the app and export --
+```

@@ -1,0 +1,60 @@
+.content {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 16px;
+  height: 100%;
+  padding: 16px 20px;
+}
+
+.leftPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.cameraSection {
+  flex: 0 0 340px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--border-glass);
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.05);
+  min-height: 0;
+}
+
+.controlsSection {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+  min-height: 0;
+}
+
+.rightPanel {
+  height: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .content {
+    grid-template-columns: 1fr;
+    grid-template-rows: 300px 1fr;
+    height: auto;
+    min-height: 100vh;
+    padding: 12px;
+  }
+  .cameraSection {
+    flex: 0 0 260px;
+    min-height: 260px;
+  }
+  .controlsSection {
+    flex: 1;
+    overflow-y: visible;
+  }
+}
