@@ -72,7 +72,15 @@ npm install
 npm run dev          # → http://localhost:3001
 ```
 
-### 3. 启动前端
+### 3. 配置前端
+
+```bash
+cd frontend
+cp .env.example .env        # VITE_API_BASE_URL=/api（Vite 代理到后端）
+```
+> 如果忘记这步，前端发请求会 404，因为不知道后端在哪。
+
+### 4. 启动前端
 
 ```bash
 cd frontend
@@ -80,7 +88,7 @@ npm install
 npm run dev          # → http://localhost:5173
 ```
 
-### 4. 使用
+### 5. 使用
 
 1. 浏览器打开 `http://localhost:5173`
 2. 允许摄像头和麦克风权限
