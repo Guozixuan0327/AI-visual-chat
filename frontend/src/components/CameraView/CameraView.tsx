@@ -13,7 +13,7 @@ export const CameraView = React.forwardRef<
   { onStreamReady?: (stream: MediaStream) => void }
 >(({ onStreamReady }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { stream, error, isPermissionGranted, startCamera, stopCamera } = useCamera();
+  const { stream, error, isLoading, isPermissionGranted, startCamera, stopCamera } = useCamera();
   const frameCapture = useFrameCapture(videoRef);
 
   // Forward the frameCapture API to parent
@@ -36,6 +36,16 @@ export const CameraView = React.forwardRef<
     startCamera().catch(console.error);
     return () => { stopCamera(); };
   }, []);
+
+  if (isLoading) {
+    return (
+      <div className={styles.permissionContainer}>
+        <div className={styles.permissionIcon}>⏳</div>
+        <h3>正在启动摄像头...</h3>
+        <p>请稍候，正在获取摄像头画面</p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
