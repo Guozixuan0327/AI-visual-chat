@@ -1,6 +1,5 @@
 # AI 视觉对话助手
 
-> **Demo 视频**: [bilibili 观看](https://www.bilibili.com/video/BV1FyJK6KExu/)
 
 > "AI不持续盯着摄像头，只在用户主动说话时抓取一次当前画面，并通过成本面板可视化'看/听'的开销。"
 
